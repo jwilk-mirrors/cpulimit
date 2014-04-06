@@ -3,6 +3,12 @@
 * Added the --quiet (-q) flag to make 
   limitcpu run silently
 
+* Make sure error messages are printed to stderr.
+
+* Placed source code in Subversion (svn) repository.
+  Accessable using the SVN checkout command. For
+  details, pelase see the README file.
+
 
 =========== Changes in 2.0 ================
 
