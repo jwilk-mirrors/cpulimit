@@ -24,16 +24,16 @@ install: cpulimit
 	mkdir -p ${PREFIX}/bin
 	mkdir -p ${PREFIX}/share/man/man1
 	cp cpulimit ${PREFIX}/bin
-	cp cpulimit.1.gz ${PREFIX}/share/man/man1
+	cp cpulimit.1 ${PREFIX}/share/man/man1
 
 deinstall:
 	rm -f ${PREFIX}/bin/cpulimit
-	rm -f ${PREFIX}/share/man/man1/cpulimit.1.gz
+	rm -f ${PREFIX}/share/man/man1/cpulimit.1
 
 clean:
 	rm -f *~ cpulimit
 	$(MAKE) -C test clean
 
 tarball: clean
-	cd .. && tar czf cpulimit-$(VERSION).tar.gz cpulimit-$(VERSION)
+	cd .. && tar czf cpulimit-$(VERSION).tar.gz cpulimit-$(VERSION) --exclude=.svn
 	
