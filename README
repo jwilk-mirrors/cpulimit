@@ -42,11 +42,11 @@ How to compile and install
 Once you have downloaded a copy of LimitCPU building should be fairly
 straight forward. First we unpack the source code
 
-tar zxf cpulimit-2.1.tar.gz
+tar zxf cpulimit-2.2.tar.gz
 
 Then we run the makefile.
 
-cd cpulimit-2.1
+cd cpulimit-2.2
 make
 
 This should produce the executable file "cpulimit". If you would like
@@ -165,6 +165,21 @@ The restore flag (-r) only works when the process to launch
 has been launched by cpulimit. For this reason it is necessary
 to specify the target program at the end of the command line
 as shown above.
+
+LimitCPU, by default, will tell a watched process to continue
+running when LimitCPU terminates. This is accomplished by
+sending the watched process the SIGCONT signal just before
+LimitCPU exits. The user can specify an alternative signal to
+send the watched process when LimitCPU terminates. This is
+accomplished using the -s or --signal command line flag. Here
+is an example of terminating a watched process
+
+cpulimit -l 25 -p 1234 -s SIGTERM
+
+And here we accomplish the same thing using a numeric value
+instead of the written form of the signal.
+
+cpulimit -l 25 -p 1234 --signal=15
 
 
 

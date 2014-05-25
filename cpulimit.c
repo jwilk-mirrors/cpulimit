@@ -102,9 +102,18 @@ int NCPU;
 // quiet mode
 int quiet = FALSE;
 
+// What signal should we send to the watched process
+// when cpulimit exists?
+int send_signal = SIGCONT;
+
 //reverse byte search
 // void *memrchr(const void *s, int c, size_t n);
 
+#define MAX_SIGNAL 7
+const char *SIGNAL_NAME[MAX_SIGNAL] = { "SIGHUP", "SIGINT", "SIGQUIT", 
+                                 "SIGKILL", "SIGTERM", "SIGSTOP", "SIGCONT" };
+const int SIGNAL_VALUE[MAX_SIGNAL] = { SIGHUP, SIGINT, SIGQUIT,
+                                  SIGKILL, SIGTERM, SIGSTOP, SIGCONT };
 
 
 //return ta-tb in microseconds (no overflow checks!)
@@ -314,8 +323,8 @@ done:
 
 //SIGINT and SIGTERM signal handler
 void quit(int sig) {
-	//let the process continue if it's stopped
-	kill(pid,SIGCONT);
+	//let the process continue if we are stopped
+	kill(pid, send_signal);
 	printf("Exiting...\n");
 	exit(0);
 }
@@ -512,7 +521,9 @@ void print_usage(FILE *stream,int exit_code) {
         fprintf(stream, "                         instead of just throttling them.\n");
         fprintf(stream, "      -r, --restore      Restore processes after they have\n");
         fprintf(stream, "                         been killed. Works with the -k flag.\n");
-
+        fprintf(stream, "      -s, --signal=SIG   Send this signal to the watched process when cpulimit exits.\n");
+        fprintf(stream, "                         Signal should be specificed as a number or \n");
+        fprintf(stream, "                         SIGTERM, SIGCONT, SIGSTOP, etc. SIGCONT is the default.\n");
 	fprintf(stream, "      -v, --verbose      show control statistics\n");
 	fprintf(stream, "      -z, --lazy         exit if there is no suitable target process,\n");
         fprintf(stream, "                         or if it dies\n");
@@ -535,6 +546,33 @@ int get_ncpu()
 }
 
 
+// This function attempts to figure out what signal we should send
+// target processes based on a command line paramter. First we check
+// for text such as SIGINT, SIGCONT, SIGSTOP, etc. If no match is found
+// then we assume the value given is a number and use that.
+int Translate_Signal(char *my_signal)
+{
+    int signal_value;
+    int index = 0, found = FALSE;
+    // first check to see if we were passed a string
+    while ( (index < MAX_SIGNAL) && (! found) )
+    {
+        if (! strcmp(my_signal, SIGNAL_NAME[index]) )
+        {
+            found = TRUE;
+            signal_value = SIGNAL_VALUE[index];
+        }
+        else
+           index++;
+    }
+
+    // no value found, try a number
+    if (! found)
+       signal_value = atoi(my_signal);
+
+    return signal_value;
+}
+
 
 
 int main(int argc, char **argv) {
@@ -547,7 +585,7 @@ int main(int argc, char **argv) {
 	//parse arguments
 	int next_option;
 	/* A string listing valid short options letters. */
-	const char* short_options="p:e:P:l:c:bqkrvzh";
+	const char* short_options="p:e:P:l:c:s:bqkrvzh";
 	/* An array describing valid long options. */
 	const struct option long_options[] = {
 		{ "pid", required_argument, NULL, 'p' },
@@ -555,11 +593,12 @@ int main(int argc, char **argv) {
 		{ "path", required_argument, NULL, 'P' },
 		{ "limit", required_argument, NULL, 'l' },
                 { "background", no_argument, NULL, 'b' },
-        { "quiet", no_argument, NULL, 'q' },
+                { "quiet", no_argument, NULL, 'q' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "lazy", no_argument, NULL, 'z' },
 		{ "help", no_argument, NULL, 'h' },
                 { "cpu", required_argument, NULL, 'c'},
+                { "signal", required_argument, NULL, 's'},
 		{ NULL, 0, NULL, 0 }
 	};
 	//argument variables
@@ -612,6 +651,14 @@ int main(int argc, char **argv) {
                                 NCPU = atoi(optarg);
                                 last_known_argument += 2;
                                 break;
+                        case 's':
+                                send_signal = Translate_Signal(optarg);
+                                if ( (send_signal < 1) || (send_signal > 35) )
+                                {
+                                    fprintf(stderr, "Specified exit signal is not recognized or not within bounds (1-35). Using SIGCONT.\n");
+                                    send_signal = SIGCONT;
+                                }
+                                last_known_argument += 2;
                         case 'k':
                                 kill_process = TRUE;
                                 last_known_argument++;
@@ -625,10 +672,10 @@ int main(int argc, char **argv) {
 				verbose = TRUE;
                                 last_known_argument++;
 				break;
-            case 'q':
-                quiet = TRUE;
+                        case 'q':
+                                quiet = TRUE;
                                 last_known_argument++;
-                break;
+                                break;
 			case 'z':
 				lazy = TRUE;
                                 last_known_argument++;
