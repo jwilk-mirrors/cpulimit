@@ -1,3 +1,6 @@
+- Add "foreground option" so that when spawning a new process cpulimit stays
+  in the foreground. This will allow for throttling of pograms in scripts.
+
 - light and scalable algorithm for subprocesses detection and limitation
 
 

@@ -1,3 +1,12 @@
+=========== Changes in 2.3 ================
+
+* Applied patch to man page which fixes -s description.
+
+* Added --foreground, -f flag for launching target programs in
+  the foreground. LimitCPU then waits for the target process to exit.
+  Should be useful in scripts. Closes Debian bug #836027.
+
+
 =========== Changes in 2.2 ================
 
 * Escaped double-dashed in manual page to avoid

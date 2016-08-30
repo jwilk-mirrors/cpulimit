@@ -80,7 +80,7 @@
 #endif
 
 #ifndef VERSION
-#define VERSION 2.1
+#define VERSION 2.3
 #endif
 
 //pid of the controlled process
@@ -103,7 +103,7 @@ int NCPU;
 int quiet = FALSE;
 
 // What signal should we send to the watched process
-// when cpulimit exists?
+// when cpulimit exits?
 int send_signal = SIGCONT;
 
 //reverse byte search
@@ -329,6 +329,20 @@ void quit(int sig) {
 	exit(0);
 }
 
+// Handle a child process quitting
+void Child_Done(int sig)
+{
+   pid_t caught_child;
+   caught_child = waitpid(-1, NULL, WNOHANG);
+   printf("Caught child process: %d\n", (int) caught_child);
+   printf("%d\n", errno);
+   if (caught_child == pid)
+   {
+      printf("Child process is finished, exiting...\n");
+      exit(0);
+   }
+}
+
 
 #ifdef FREEBSD
 //get jiffies count from /proc filesystem
@@ -512,6 +526,7 @@ void print_usage(FILE *stream,int exit_code) {
         fprintf(stream, "                         executable program file\n");
 	fprintf(stream, "   OPTIONS\n");
         fprintf(stream, "      -b  --background   run in background\n");
+        fprintf(stream, "      -f  --foreground   launch target process in foreground and wait for it to exit\n");
         fprintf(stream, "      -c  --cpu=N        override the detection of CPUs on the machine.\n");
 	fprintf(stream, "      -l, --limit=N      percentage of cpu allowed from 1 up.\n");
         fprintf(stream, "                         Usually 1 - %d00, but can be higher\n", NCPU);
@@ -585,7 +600,7 @@ int main(int argc, char **argv) {
 	//parse arguments
 	int next_option;
 	/* A string listing valid short options letters. */
-	const char* short_options="p:e:P:l:c:s:bqkrvzh";
+	const char* short_options="p:e:P:l:c:s:bfqkrvzh";
 	/* An array describing valid long options. */
 	const struct option long_options[] = {
 		{ "pid", required_argument, NULL, 'p' },
@@ -593,6 +608,7 @@ int main(int argc, char **argv) {
 		{ "path", required_argument, NULL, 'P' },
 		{ "limit", required_argument, NULL, 'l' },
                 { "background", no_argument, NULL, 'b' },
+                { "foreground", no_argument, NULL, 'f' },
                 { "quiet", no_argument, NULL, 'q' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "lazy", no_argument, NULL, 'z' },
@@ -603,7 +619,7 @@ int main(int argc, char **argv) {
 	};
 	//argument variables
 	const char *exe=NULL;
-	const char *path=NULL;
+        const char *path=NULL;
 	int perclimit=0;
 	int pid_ok = FALSE;
 	int process_ok = FALSE;
@@ -611,6 +627,8 @@ int main(int argc, char **argv) {
         int last_known_argument = 0;
         int kill_process = FALSE;   // kill process instead of stopping it
         int restore_process = FALSE;  // restore killed process
+        int run_child_in_background = TRUE;  // run cpulimit in background when 
+                                             //  we launch new process
         // struct rlimit maxlimit;
 
         NCPU = get_ncpu();
@@ -621,6 +639,11 @@ int main(int argc, char **argv) {
 		switch(next_option) {
                         case 'b':
                                 run_in_background = TRUE;
+                                last_known_argument++;
+                                break;
+                        case 'f':
+                                run_child_in_background = FALSE;
+                                run_in_background = FALSE;
                                 last_known_argument++;
                                 break;
 			case 'p':
@@ -699,6 +722,7 @@ int main(int argc, char **argv) {
 		}
 	} while(next_option != -1);
 
+        signal(SIGCHLD, Child_Done);
 
         // try to launch a program passed on the command line
         // But only if we do not already have a PID to watch
@@ -737,39 +761,34 @@ int main(int argc, char **argv) {
               // a running head start to avoid death at start-up
               if (kill_process)
                  sleep(5);
-     
-              limit_pid = fork();
-              if (limit_pid == 0)   // child
+    
+              /* The following block assumes we want to run cpulimit in the
+                 background. This is the default behaviour.
+              */ 
+              if (run_child_in_background)
               {
-                 pid = forked_pid;    // the first child
-                 lazy = TRUE;
-                 pid_ok = TRUE;
-                 if (verbose)
-                   printf("Throttling process %d\n", (int) pid);
-              }
-              else    // parent
-                exit(0);
-           }
+                 limit_pid = fork();
+                 if (limit_pid == 0)   // child cpulimit process running in background
+                 {
+                    pid = forked_pid;    // the first child, target process
+                    lazy = TRUE;
+                    pid_ok = TRUE;
+                    if (verbose)
+                      printf("Throttling process %d\n", (int) pid);
+                 }
+                 else    // parent cpulimit process which can quit
+                   exit(0);
+              }  // end of running in background
+              else
+              {
+                  pid = forked_pid;
+                  lazy = TRUE;
+                  pid_ok = TRUE;
+                  run_in_background = FALSE;
+              }  // end of running in foreground
 
-           /*
-           else if (forked_pid == 0)   // child
-           {
-               lazy = TRUE;
-               pid_ok = TRUE;
-               pid = getppid();
-               if (verbose)
-                  printf("Throttling process %d\n", (int) pid);
-           }
-           else // parent
-           {
-               execvp(argv[last_known_argument], 
-                      &(argv[last_known_argument]));
-               
-               // we should never return  
-               exit(2);
-           }
-           */
-           
+           }  // end of parent that launched target
+
         }      // end of launching child process
 
 	if (!process_ok && !pid_ok) {
@@ -820,50 +839,6 @@ int main(int argc, char **argv) {
            printf("%d CPUs detected.\n", NCPU);
 
         increase_priority();
-/*
-Instead of all this big block of code to detect and change
-priority settings, let us just use the increase_priority()
-function. It is a little more simple and takes a more
-gradual approach, rather than "all or nothing".
--- Jesse
-
-	if (setpriority(PRIO_PROCESS, my_pid,-20)!=0) {
-	//if that failed, check if we have a limit 
-        // by how much we can raise the priority
-#ifdef RLIMIT_NICE 
-//check if non-root can even make changes 
-// (ifdef because it's only available in linux >= 2.6.13)
-		nice_lim=getpriority(PRIO_PROCESS, my_pid);
-		getrlimit(RLIMIT_NICE, &maxlimit);
-
-//if we can do better then current
-		if( (20 - (signed)maxlimit.rlim_cur) < nice_lim &&  
-		    setpriority(PRIO_PROCESS, my_pid,
-                    20 - (signed)maxlimit.rlim_cur)==0 //and it actually works
-		  ) {
-
-			//if we can do better, but not by much, warn about it
-			if( (nice_lim - (20 - (signed)maxlimit.rlim_cur)) < 9) 
-                        {
-			printf("Warning, can only increase priority by %d.\n",                                nice_lim - (20 - (signed)maxlimit.rlim_cur));
-			}
-                        //our new limit
-			nice_lim = 20 - (signed)maxlimit.rlim_cur; 
-
-		} else 
-// otherwise don't try to change priority. 
-// The below will also run if it's not possible 
-// for non-root to change priority
-#endif
-		{
-			printf("Warning: cannot renice.\nTo work better you should run this program as root, or adjust RLIMIT_NICE.\nFor example in /etc/security/limits.conf add a line with: * - nice -10\n\n");
-			nice_lim=INT_MAX;
-		}
-	} else {
-		nice_lim=-20;
-	}
-*/
-
 
 	//time quantum in microseconds. it's splitted in a working period and a sleeping one
 	int period=100000;
@@ -945,9 +920,9 @@ wait_for_process:
                         // printf("Continue\n");
 			//resume process
 			if (kill(pid,SIGCONT)!=0) {
-                if (!quiet)
+                             if (!quiet)
     				fprintf(stderr,"Process %d dead!\n",pid);
-				if (lazy) exit(2);
+	                     if (lazy) exit(2);
 				//wait until our process appears
 				goto wait_for_process;
 			}
@@ -1024,16 +999,16 @@ wait_for_process:
                              }
                          }
                      }
-                     // do not kll process, just throttle it
+                     // do not kill process, just throttle it
                      else
                      {
 
                         // printf("Stop\n");
 			//stop process, it has worked enough
 			if (kill(pid,SIGSTOP)!=0) {
-                if (!quiet)
+                            if (!quiet)
     				fprintf(stderr,"Process %d dead!\n", pid);
-				if (lazy) exit(2);
+		            if (lazy) exit(2);
 				//wait until our process appears
 				goto wait_for_process;
 			}
