@@ -56,6 +56,11 @@
 #include <sys/user.h>
 #endif
 
+#ifdef LINUX
+#include <dirent.h>
+#define PROC_FILENAME 64
+#define LINE_LENGTH 256
+#endif
 
 //kernel time resolution (inverse of one jiffy interval) in Hertz
 //i don't know how to detect it, then define to the default (not very clean!)
@@ -80,7 +85,7 @@
 #endif
 
 #ifndef VERSION
-#define VERSION 2.3
+#define VERSION 2.4
 #endif
 
 //pid of the controlled process
@@ -121,6 +126,29 @@ inline long timediff(const struct timespec *ta,const struct timespec *tb) {
     unsigned long us = (ta->tv_sec-tb->tv_sec)*1000000 + (ta->tv_nsec/1000 - tb->tv_nsec/1000);
     return us;
 }
+
+
+#ifdef LINUX
+#include <pthread.h>
+
+typedef struct
+{
+   pid_t child;   // the child of our target process
+   pid_t monitor; // the LimitCPU fork monitoring the child
+   void *next; 
+} CHILD;
+
+int quitting = FALSE;           // Have we receive a quit signal
+int monitor_children = FALSE;   // are we monitoring children of target
+
+// Data passed to the monitor thread
+typedef struct
+{
+   int limit;           // per cent limit to place on a process
+   char *this_program;  // copy of argv[0]
+} PROGRAM_DATA;
+
+#endif
 
 
 
@@ -325,6 +353,14 @@ done:
 void quit(int sig) {
 	//let the process continue if we are stopped
 	kill(pid, send_signal);
+        #ifdef LINUX
+        if (monitor_children)
+        {
+            quitting = TRUE;
+            printf("Asking children to quit...\n");
+            sleep(2);                // wait for thread clean-up
+        }
+        #endif
 	printf("Exiting...\n");
 	exit(0);
 }
@@ -334,8 +370,12 @@ void Child_Done(int sig)
 {
    pid_t caught_child;
    caught_child = waitpid(-1, NULL, WNOHANG);
-   printf("Caught child process: %d\n", (int) caught_child);
-   printf("%d\n", errno);
+   if (verbose)
+   {
+      printf("Caught child process: %d\n", (int) caught_child);
+      printf("%d\n", errno);
+   }
+   // If this was the one process we were watching, we can quit now.
    if (caught_child == pid)
    {
       printf("Child process is finished, exiting...\n");
@@ -345,7 +385,6 @@ void Child_Done(int sig)
 
 
 #ifdef FREEBSD
-//get jiffies count from /proc filesystem
 int getjiffies(int pid)
 {
    kvm_t *my_kernel = NULL;
@@ -373,6 +412,7 @@ int getjiffies(int pid)
 #endif
 
 #ifdef LINUX
+//get jiffies count from /proc filesystem
 int getjiffies(int pid) {
 	static char stat[20];
 	static char buffer[1024];
@@ -514,6 +554,248 @@ void increase_priority()
 
 
 
+#ifdef LINUX
+// This following functions are for detecting and limiting child
+// processes on Linux.
+
+// This function adds a new child process to our list of child processes.
+CHILD *Add_Child(CHILD *all_children, pid_t new_pid)
+{
+    CHILD *new_child = (CHILD *) calloc(sizeof(CHILD), 1);
+    CHILD *current;
+
+    if (! new_child)
+       return all_children;
+
+    new_child->next = NULL;
+    new_child->child = new_pid;
+    new_child->monitor = 0;
+
+    if (all_children)
+    {
+        current = all_children;
+        while (current->next)
+           current = current->next;
+        current->next = new_child;
+        return all_children;
+    }
+    else   // this is the first node
+       return new_child;
+}
+
+
+
+// This function removes a child PID node.
+CHILD *Remove_Child(CHILD *all_children, pid_t old_pid)
+{
+    CHILD *current, *previous = NULL;
+    int found = FALSE;
+
+    current = all_children;
+    while ( (! found) && (current) )
+    {
+        if (current->child == old_pid)
+        {
+           if (previous)
+               previous->next = current->next;
+           else
+             all_children = current->next;
+           
+           free(current);
+           found = TRUE;
+        }
+        else
+        {
+            previous = current;
+            current = current->next;
+        }
+     }
+     return all_children;
+}
+
+
+// This function cleans up all remaining child nodes.
+void Clean_Up_Children(CHILD *all_children)
+{
+   CHILD *current, *next;
+
+   current = all_children;
+   while (current)
+   {
+      next = current->next;
+      free(current);
+      current = next;
+   }
+}
+
+
+// This function searches the linked list for a matching PID.
+// It returns NULL if no match is found and a pointer to the
+// node is a match is located.
+CHILD *Find_Child(CHILD *children, pid_t target)
+{
+   CHILD *current;
+   int found = FALSE;
+
+   current = children;
+   while ( (!found) && (current) )
+   {
+      if (current->child == target)
+        found = TRUE;
+      else
+        current = current->next;
+   }
+   return current;
+}
+
+
+
+// This function returns a list of process IDs of children
+// of the given process (PID). It does this by searching the /proc
+// file system and looking in the /proc/pid/status file for the PPid field.
+// A linked list of child PIDs is returned on success or NULL on failure or
+// if no child PIDs are found.
+CHILD *Find_Child_PIDs(CHILD *all_children, pid_t parent_pid)
+{
+    int found = FALSE;
+    DIR *proc;
+    struct dirent *proc_entry;
+    char filename[PROC_FILENAME];
+    FILE *status_file;
+    char *reading_file;
+    char line[256];
+    pid_t new_ppid;
+    int current_pid;
+
+    proc = opendir("/proc");
+    if (! proc)
+       return all_children;
+
+    proc_entry = readdir(proc);
+    while (proc_entry)
+    {
+        snprintf(filename, PROC_FILENAME, "/proc/%s/status", proc_entry->d_name);
+        status_file = fopen(filename, "r");
+        if (status_file)
+        {
+           found = FALSE;
+           reading_file = fgets(line, LINE_LENGTH, status_file);
+           while ( (! found) && (reading_file) )
+           {
+             if (! strncmp(line, "PPid:", 5) )
+             {
+                 sscanf(&(line[6]), "%d", &new_ppid);
+                 if (new_ppid == parent_pid)
+                 {
+                     sscanf(proc_entry->d_name, "%d", &current_pid);
+                     if (! Find_Child(all_children, current_pid) )
+                        all_children = Add_Child(all_children, current_pid);
+                 }
+                 found = TRUE;
+             }
+             else
+                reading_file = fgets(line, LINE_LENGTH, status_file);
+           }   // done reading status file
+          
+           fclose(status_file);
+        }
+        proc_entry = readdir(proc);
+    }   // done reading proc file system
+    closedir(proc);
+    return all_children;
+}
+
+
+// This function (which should probably be called as a thread) monitors the
+// system for child processes of the current target process. When a new
+// child of the target is located, it is added to the CHILD list.
+// New children result in a new fork of this program being spawned to
+// monitor the child process and its children.
+
+void *Monitor_Children(void *all_data)
+{
+   CHILD *all_children = NULL;
+   CHILD *current;
+   PROGRAM_DATA *program_data = (PROGRAM_DATA *) all_data;
+
+   while (! quitting )
+   {
+      // Check for new child processes
+      all_children = Find_Child_PIDs(all_children, pid);
+
+      // Find any children without monitors and create a monitoring process
+      // Clean out old processes while we are looking
+      current = all_children;
+      while (current)
+      {
+         // First see if the child process is still running. If not,
+         // we can remote its node.
+         if (current->child)
+         {
+             char filename[PROC_FILENAME];
+             DIR *child_directory;
+             snprintf(filename, PROC_FILENAME, "/proc/%d", current->child);
+             child_directory = opendir(filename);
+             if (child_directory)
+                closedir(child_directory);
+             else
+             {
+                if (verbose)
+                  printf("Child process %d done, cleaning up.\n",
+                          (int) current->child);
+                all_children = Remove_Child(all_children, current->child);
+             }
+         }  // end of clean up children processes no longer running
+
+         // The child process is still running, but it might not have
+         // a monitor. Create a new monitoring process.
+         if ( (current->child) && (! current->monitor) )
+         {
+              pid_t returned_pid;
+
+              if (verbose)
+                 printf("Creating monitoring process for %d\n",
+                        (int) current->child);
+
+              returned_pid = fork();
+              if (returned_pid > 0)
+              {
+                 // parent
+                 current->monitor = returned_pid;
+              }
+              else if (returned_pid == 0)
+              {
+                 // child
+                 char limit_amount[16];
+                 char process_identifier[16];
+                 snprintf(limit_amount, 16, "%d", (int) program_data->limit);
+                 snprintf(process_identifier, 16, "%d", current->child);
+                 if (verbose)
+                    printf("Starting monitor with: %s -l %s -p %s -z -m\n",
+                            program_data->this_program, limit_amount,
+                            process_identifier);
+                 execl(program_data->this_program, program_data->this_program,
+                       "-l", limit_amount, "-p", process_identifier, 
+                       "-z", "-m", (char *) NULL);
+              }
+              
+         }    // end of creating a new monitor
+         if (verbose)
+         {
+             printf("Watching child: %d with %d\n", 
+                   (int) current->child, (int) current->monitor);
+         }
+         current = current->next;
+      }
+      sleep(1);
+   }  // end LimitCPU is still running
+   pthread_exit(NULL);
+}
+
+#endif       // end of monitoring children processes on Linux
+
+
+
 void print_usage(FILE *stream,int exit_code) {
         fprintf(stream, "CPUlimit version %1.1f\n", VERSION);
 	fprintf(stream, "Usage: %s TARGET [OPTIONS...] [-- PROGRAM]\n",program_name);
@@ -531,6 +813,9 @@ void print_usage(FILE *stream,int exit_code) {
 	fprintf(stream, "      -l, --limit=N      percentage of cpu allowed from 1 up.\n");
         fprintf(stream, "                         Usually 1 - %d00, but can be higher\n", NCPU);
         fprintf(stream, "                         on multi-core CPUs (mandatory)\n");
+        #ifdef LINUX
+        fprintf(stream, "      -m, --monitor-forks  Watch children/forks of the target process\n");
+        #endif
         fprintf(stream, "      -q, --quiet        run in quiet mode (only print errors).\n");
         fprintf(stream, "      -k, --kill         kill processes going over their limit\n");
         fprintf(stream, "                         instead of just throttling them.\n");
@@ -600,7 +885,12 @@ int main(int argc, char **argv) {
 	//parse arguments
 	int next_option;
 	/* A string listing valid short options letters. */
+        #ifdef LINUX
+	const char* short_options="p:e:P:l:c:s:bfqkmrvzh";
+        PROGRAM_DATA program_data;
+        #else
 	const char* short_options="p:e:P:l:c:s:bfqkrvzh";
+        #endif
 	/* An array describing valid long options. */
 	const struct option long_options[] = {
 		{ "pid", required_argument, NULL, 'p' },
@@ -615,6 +905,9 @@ int main(int argc, char **argv) {
 		{ "help", no_argument, NULL, 'h' },
                 { "cpu", required_argument, NULL, 'c'},
                 { "signal", required_argument, NULL, 's'},
+                #ifdef LINUX
+                { "monitor-forks", no_argument, NULL, 'm'},
+                #endif
 		{ NULL, 0, NULL, 0 }
 	};
 	//argument variables
@@ -686,6 +979,12 @@ int main(int argc, char **argv) {
                                 kill_process = TRUE;
                                 last_known_argument++;
                                 break;
+                        #ifdef LINUX
+                        case 'm':
+                                monitor_children = TRUE;
+                                last_known_argument++;
+                                break;
+                        #endif
                         case 'r':
                                 restore_process = TRUE;
                                 last_known_argument++;
@@ -870,6 +1169,23 @@ wait_for_process:
 	if (verbose) print_caption();
 
 	float pcpu_avg=0;
+
+        // On Linux we can monitor child processes of the target
+        #ifdef LINUX
+        if (monitor_children)
+        {
+           pthread_t my_thread;
+           int thread_status;
+           if (verbose)
+              printf("Starting fork monitoring thread...\n");
+           program_data.this_program = argv[0];
+           program_data.limit = perclimit;
+           thread_status = pthread_create(&my_thread, NULL, 
+                                          Monitor_Children, &program_data);
+           if ( (thread_status) && (verbose) )
+              printf("Creating fork monitoring thread failed.\n");
+        }
+        #endif
 
 	//here we should already have high priority, for time precision
 	while(1) {

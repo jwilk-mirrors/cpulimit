@@ -1,3 +1,9 @@
+========== Changes in 2.4 =================
+
+* Introduced ability to watch children of the target
+  process. This means forks of the process we are throttling
+  can also be throttled, using the "-m" or "--monitor-forks" flags.
+
 =========== Changes in 2.3 ================
 
 * Applied patch to man page which fixes -s description.

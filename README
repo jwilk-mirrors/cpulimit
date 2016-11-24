@@ -22,7 +22,7 @@ A copy of the license should be included with this program in a
 file named LICENSE.
 
 Copyright 2005, Angelo Marletta <marlonx80@hotmail.com>
-Copyright 2011-2014, Jesse Smith <jessefrgsmith@yahoo.ca>
+Copyright 2011-2016, Jesse Smith <jessefrgsmith@yahoo.ca>
 
 
 
@@ -181,6 +181,13 @@ instead of the written form of the signal.
 
 cpulimit -l 25 -p 1234 --signal=15
 
+LimitCPU can be used to watch not only one target process, but also
+child processes the target spawns. This means new processs the
+target creates will also be throttled. By default, LimitCPU
+only watches one target process and ignores children, but monitoring
+children can be enabled using the "-m" or "--monitor-forks" flag.
+
+cpulimit -l 25 -p 1234 -m
 
 
 

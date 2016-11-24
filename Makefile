@@ -1,4 +1,4 @@
-VERSION?=2.3
+VERSION?=2.4
 PREFIX?=/usr
 CFLAGS?=-Wall -O2 -DVERSION=$(VERSION)
 CC?=gcc
@@ -15,7 +15,7 @@ freebsd:
 	$(CC) -o cpulimit cpulimit.c -lrt -DFREEBSD $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
 
 cpulimit: cpulimit.c
-	$(CC) -o cpulimit cpulimit.c -lrt -DLINUX $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
+	$(CC) -o cpulimit cpulimit.c -pthread -lrt -DLINUX $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
 
 tests:
 	$(MAKE) -C test
