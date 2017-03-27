@@ -1,3 +1,9 @@
+========== Changes in 2.5 =================
+
+* Added some protection against causing a fork bomb
+  when the throttled process is a parent to LimitCPU.
+  Patch provided by Johann Felix.
+
 ========== Changes in 2.4 =================
 
 * Introduced ability to watch children of the target

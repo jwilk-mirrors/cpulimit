@@ -685,7 +685,7 @@ CHILD *Find_Child_PIDs(CHILD *all_children, pid_t parent_pid)
              if (! strncmp(line, "PPid:", 5) )
              {
                  sscanf(&(line[6]), "%d", &new_ppid);
-                 if (new_ppid == parent_pid)
+                 if (new_ppid == parent_pid && current_pid != getpid() )
                  {
                      sscanf(proc_entry->d_name, "%d", &current_pid);
                      if (! Find_Child(all_children, current_pid) )
