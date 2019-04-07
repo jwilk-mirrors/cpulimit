@@ -232,15 +232,16 @@ int waitforpid(int pid) {
 done:
     if (!quiet)
     	printf("Process %d detected\n",pid);
-	//now set high priority, if possible
-	// if (setpriority(PRIO_PROCESS,getpid(),-20)!=0) {
-        /*
-        if ( (nice_lim < INT_MAX) &&
-             (setpriority(PRIO_PROCESS, my_pid, nice_lim) != 0) ) {
-		printf("Warning: cannot renice.\nTo work better you should run this program as root.\n");
-	}
-        */
-	return 0;
+
+    //now set high priority, if possible
+    // if (setpriority(PRIO_PROCESS,getpid(),-20)!=0) {
+    /*
+    if ( (nice_lim < INT_MAX) &&
+         (setpriority(PRIO_PROCESS, my_pid, nice_lim) != 0) ) {
+       printf("Warning: cannot renice.\nTo work better you should run this program as root.\n");
+    }
+    */
+    return 0;
 
 }
 
@@ -337,16 +338,16 @@ int getpidof(const char *process) {
 done:
     if (!quiet)
     	printf("Process %d detected\n",pid);
-	//now set high priority, if possible
-	// if (setpriority(PRIO_PROCESS,getpid(),-20)!=0) {
-        /*
-        if ( (nice_lim < INT_MAX) &&
-             (setpriority(PRIO_PROCESS, my_pid, nice_lim) != 0) ) {
-		printf("Warning: cannot renice.\nTo work better you should run this program as root.\n");
-	}
-        */
-	return pid;
 
+    //now set high priority, if possible
+    // if (setpriority(PRIO_PROCESS,getpid(),-20)!=0) {
+    /*
+    if ( (nice_lim < INT_MAX) &&
+         (setpriority(PRIO_PROCESS, my_pid, nice_lim) != 0) ) {
+       printf("Warning: cannot renice.\nTo work better you should run this program as root.\n");
+    }
+    */
+    return pid;
 }
 
 //SIGINT and SIGTERM signal handler
@@ -1193,11 +1194,12 @@ wait_for_process:
 		//estimate how much the controlled process is using the cpu in its working interval
 		struct cpu_usage cu;
 		if (compute_cpu_usage(pid,workingtime,&cu)==-1) {
-            if (!quiet)
+                     if (!quiet)
     			fprintf(stderr,"Process %d dead!\n",pid);
-			if (lazy) exit(2);
-			//wait until our process appears
-			goto wait_for_process;		
+		     if (lazy) 
+                        exit(2);
+		     //wait until our process appears
+	             goto wait_for_process;		
 		}
 
 		//cpu actual usage of process (range 0-1)

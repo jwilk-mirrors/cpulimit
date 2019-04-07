@@ -1,3 +1,9 @@
+========== Changes in 2.6 (unreleased) ====
+
+* Fixed indentation to avoid compiler warnings. No functional change.
+
+* Updated manual page to warn against using -m on a script.
+
 ========== Changes in 2.5 =================
 
 * Added some protection against causing a fork bomb

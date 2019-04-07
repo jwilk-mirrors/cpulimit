@@ -42,11 +42,11 @@ How to compile and install
 Once you have downloaded a copy of LimitCPU building should be fairly
 straight forward. First we unpack the source code
 
-tar zxf cpulimit-2.2.tar.gz
+tar zxf cpulimit-2.6.tar.gz
 
 Then we run the makefile.
 
-cd cpulimit-2.2
+cd cpulimit-2.6
 make
 
 This should produce the executable file "cpulimit". If you would like
